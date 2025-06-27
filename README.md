@@ -36,6 +36,114 @@ python server.py # Or whatever your main server file is named
 
 *(Replace `server.py` with the actual name of your main server file)*
 
+## API Examples
+
+Here are examples demonstrating how to interact with the dummy CMS server.
+
+*(Note: Endpoints and request/response formats are illustrative and may vary based on implementation details.)*
+
+### Start Charging Transaction
+
+**Request:**
+
+```bash
+# Example using curl
+curl -X POST \\
+  http://localhost:5000/start_transaction \\
+  -H "Content-Type: application/json" \\
+  -d '{
+        "connectorId": 1,
+        "idTag": "RFID123",
+        "meterStart": 0,
+        "timestamp": "2023-10-27T10:00:00Z"
+      }'
+```
+
+**Expected Response (Success):**
+
+```json
+{
+  "transactionId": 123,
+  "idTagInfo": {
+    "status": "Accepted"
+  }
+}
+```
+
+*(Add screenshot of request and response here)*
+<!-- ![Start Transaction Example Screenshot](link/to/your/start_transaction_screenshot.png) -->
+
+### Stop Charging Transaction
+
+**Request:**
+
+```bash
+# Example using curl
+curl -X POST \\
+  http://localhost:5000/stop_transaction \\
+  -H "Content-Type: application/json" \\
+  -d '{
+        "transactionId": 123,
+        "meterStop": 1500,
+        "timestamp": "2023-10-27T10:30:00Z",
+        "idTag": "RFID123"
+      }'
+```
+
+**Expected Response (Success):**
+
+```json
+{
+  "idTagInfo": {
+    "status": "Accepted"
+  },
+  "meterStop": 1500,
+  "timestamp": "2023-10-27T10:30:00Z",
+  "transactionId": 123
+}
+```
+
+*(Add screenshot of request and response here)*
+<!-- ![Stop Transaction Example Screenshot](link/to/your/stop_transaction_screenshot.png) -->
+
+### List All Sessions/Transactions
+
+**Request:**
+
+```bash
+# Example using curl
+curl -X GET \\
+  http://localhost:5000/list_sessions
+```
+
+**Expected Response (Success):**
+
+```json
+[
+  {
+    "transactionId": 123,
+    "connectorId": 1,
+    "idTag": "RFID123",
+    "meterStart": 0,
+    "timestampStart": "2023-10-27T10:00:00Z",
+    "meterStop": 1500,
+    "timestampStop": "2023-10-27T10:30:00Z"
+  },
+  {
+    "transactionId": 124,
+    "connectorId": 2,
+    "idTag": "RFID456",
+    "meterStart": 500,
+    "timestampStart": "2023-10-27T11:00:00Z",
+    "meterStop": null,
+    "timestampStop": null
+  }
+]
+```
+
+*(Add screenshot of request and response here)*
+<!-- ![List Sessions Example Screenshot](link/to/your/list_sessions_screenshot.png) -->
+
 ## License
 
 [Include license information here if applicable]
