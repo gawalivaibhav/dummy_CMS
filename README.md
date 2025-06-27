@@ -9,7 +9,9 @@ The purpose of this project is to simulate the core functionalities of a CMS pro
 The implemented features include:
 
 -   **Start Charging:** Simulate the initiation of a charging session.
+
 -   **Stop Charging:** Simulate the termination of a charging session.
+
 -   **List Sessions/Transactions:** View a list of recorded charging sessions or transactions.
 
 ## Built with Goose AI
@@ -49,7 +51,7 @@ Here are examples demonstrating how to interact with the dummy CMS server.
 ```bash
 # Example using curl
 curl -X POST \\\
-  http://localhost:5000/start_charging \\\
+  http://localhost:5050/start_charging \\\
   -H "Content-Type: application/json" \\\
   -d \'{
         "connectorId": 1,
@@ -80,7 +82,7 @@ curl -X POST \\\
 ```bash
 # Example using curl
 curl -X POST \\\
-  http://localhost:5000/stop_charging \\\
+  http://localhost:5050/stop_charging \\\
   -H "Content-Type: application/json" \\\\\
   -d \'{
         "transactionId": 123,
@@ -113,7 +115,7 @@ curl -X POST \\\
 ```bash
 # Example using curl
 curl -X GET \\\
-  http://localhost:5000/sessions
+  http://localhost:5050/sessions
 ```
 
 **Expected Response (Success):**
