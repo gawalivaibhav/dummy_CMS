@@ -1,8 +1,11 @@
 import logging
 import json
 import datetime
+import asyncio # Import asyncio for WebSocket client
+import websockets # Import websockets for WebSocket client
+
 # Import Quart specific modules
-from quart import Quart, websocket, jsonify, request, Response # Added request and Response
+from quart import Quart, websocket, jsonify, request, Response
 
 # Import database functions from database.py
 from database import init_db, create_session, update_session, get_all_sessions
@@ -20,21 +23,124 @@ async def initialize_database():
     init_db()
     logging.info("Database initialization complete.")
 
+# --- WebSocket Client Function ---
+async def send_ocpp_message(message: list):
+    """Connects to the OCPP WebSocket server and sends a message."""
+    uri = "ws://localhost:5050/ocpp"
+    try:
+        # Use connect as a context manager for automatic closing
+        async with websockets.connect(uri) as websocket:
+            logging.info(f"WebSocket client connecting to {uri} from HTTP handler.")
+            await websocket.send(json.dumps(message))
+            logging.info(f"WebSocket client sent message from HTTP handler: {message}")
+
+            # Optional: Wait for a response if the server sends one immediately
+            # Your WebSocket server handler on /ocpp will likely send a response (e.g., CallResult)
+            try:
+                response = await asyncio.wait_for(websocket.recv(), timeout=5.0) # Short timeout
+                logging.info(f"WebSocket client received response from HTTP handler: {response}")
+                return response
+            except asyncio.TimeoutError:
+                logging.warning("WebSocket client from HTTP handler timed out waiting for response.")
+                return None
+            except websockets.exceptions.ConnectionClosedOK:
+                 logging.info("WebSocket server closed connection gracefully after message from HTTP handler.")
+                 return None
+
+
+    except ConnectionRefusedError:
+        logging.error(f"WebSocket connection refused by server at {uri} from HTTP handler. Is the WebSocket server running?")
+    except Exception as e:
+        logging.error(f"WebSocket client from HTTP handler encountered an error: {e}", exc_info=True)
+    return None # Return None on error
+
+
 # --- HTTP Routes ---
-# Using async def for routes as Quart is asynchronous
 @app.route('/start_charging', methods=['POST'])
 async def start_charging_http():
-    logging.info("Received HTTP request to start charging (NOTE: HTTP routes are separate from OCPP)")
-    # In a real scenario, you'd process request data and logic here
-    # For this dummy route, just return a mock response
-    return jsonify({"status": "success", "message": "Charging started (dummy via HTTP)"})
+    logging.info("Received HTTP request to /start_charging")
+    request_data = await request.get_json() or {} # Get request body if JSON
+
+    # Extract relevant data from the HTTP request body for the OCPP message
+    # This is an example mapping; adjust based on your HTTP request structure
+    id_tag = request_data.get("idTag", "UnknownIdTag")
+    connector_id = request_data.get("connectorId", 1) # Default connectorId
+    meter_start = request_data.get("meterStart", 0)
+    timestamp = request_data.get("timestamp", datetime.datetime.utcnow().isoformat() + "Z")
+
+
+    # Prepare the OCPP StartTransaction.req message (OCPP 1.6J format)
+    ocpp_message = [
+        2, # MessageTypeId: Call
+        str(datetime.datetime.now().timestamp()), # Generate a unique MessageId (timestamp is simple)
+        "StartTransaction", # Action
+        { # Payload
+            "connectorId": connector_id,
+            "idTag": id_tag,
+            "meterStart": meter_start,
+            "timestamp": timestamp # Use the provided timestamp or generated
+        }
+    ]
+
+    logging.info(f"Attempting to send OCPP StartTransaction message via WebSocket client: {ocpp_message}")
+
+    # Send the OCPP message via WebSocket client and await the response
+    ocpp_response = await send_ocpp_message(ocpp_message)
+
+    # You can process the ocpp_response here and include it in the HTTP response if needed
+    # For this example, we'll just return a simple confirmation
+    response_message = {"status": "success", "message": "Attempted to start charging via OCPP", "ocpp_client_response": ocpp_response}
+    return jsonify(response_message)
+
 
 @app.route('/stop_charging', methods=['POST'])
 async def stop_charging_http():
-    logging.info("Received HTTP request to stop charging (NOTE: HTTP routes are separate from OCPP)")
-    # In a real scenario, you'd process request data and logic here
-    # For this dummy route, just return a mock response
-    return jsonify({"status": "success", "message": "Charging stopped (dummy via HTTP)"})
+    logging.info("Received HTTP request to /stop_charging")
+    request_data = await request.get_json() or {} # Get request body if JSON
+
+    # Extract relevant data from the HTTP request body for the OCPP message
+    # This is an example mapping; adjust based on your HTTP request structure
+    transaction_id = request_data.get("transactionId")
+    meter_stop = request_data.get("meterStop")
+    timestamp = request_data.get("timestamp", datetime.datetime.utcnow().isoformat() + "Z")
+    id_tag = request_data.get("idTag") # Optional in StopTransaction.req but useful
+
+
+    # Basic validation
+    if transaction_id is None or meter_stop is None:
+         response_message = {"status": "error", "message": "Missing transactionId or meterStop in request body"}
+         return jsonify(response_message), 400
+
+
+    # Prepare the OCPP StopTransaction.req message (OCPP 1.6J format)
+    ocpp_message = [
+        2, # MessageTypeId: Call
+        str(datetime.datetime.now().timestamp()), # Generate a unique MessageId
+        "StopTransaction", # Action
+        { # Payload
+            "transactionId": transaction_id,
+            "meterStop": meter_stop,
+            "timestamp": timestamp, # Use the provided timestamp or generated
+            # You can add other optional fields like "idTag", "transactionData" here
+            "idTag": id_tag # Including idTag if available
+        }
+    ]
+    # Remove idTag if it's None to match OCPP spec stricter interpretation for StopTransaction.req
+    if "idTag" in ocpp_message[3] and ocpp_message[3]["idTag"] is None:
+        del ocpp_message[3]["idTag"]
+
+
+    logging.info(f"Attempting to send OCPP StopTransaction message via WebSocket client: {ocpp_message}")
+
+    # Send the OCPP message via WebSocket client and await the response
+    ocpp_response = await send_ocpp_message(ocpp_message)
+
+
+    # You can process the ocpp_response here and include it in the HTTP response if needed
+    # For this example, we'll just return a simple confirmation
+    response_message = {"status": "success", "message": "Attempted to stop charging via OCPP", "ocpp_client_response": ocpp_response}
+    return jsonify(response_message)
+
 
 @app.route('/')
 async def index():
@@ -47,6 +153,15 @@ async def list_sessions():
     logging.info("Received HTTP GET request for /sessions")
     sessions_list = get_all_sessions() # Use the function from database.py
     logging.info(f"Returning {len(sessions_list)} sessions from database.")
+    # Convert datetime objects in sessions_list to string for JSON serialization
+    for session in sessions_list:
+        if isinstance(session.get('timestampStart'), datetime.datetime):
+            session['timestampStart'] = session['timestampStart'].isoformat() + "Z"
+        if isinstance(session.get('timestampStop'), datetime.datetime):
+             session['timestampStop'] = session['timestampStop'].isoformat() + "Z"
+        # Ensure transactionId is serializable if needed, though it should be int
+
+
     return jsonify(sessions_list)
 
 # --- New OCPP 1.6J WebSocket Route using Quart ---
@@ -79,12 +194,23 @@ async def ocpp_websocket():
                     id_tag = payload.get("idTag")
                     meter_start = payload.get("meterStart", 0)
                     # Use current UTC time if not provided in payload - database function handles this or we pass it
-                    timestamp = payload.get("timestamp", datetime.datetime.utcnow().isoformat())
+                    # Ensure timestamp from payload is used if present
+                    timestamp_str = payload.get("timestamp")
+                    if timestamp_str:
+                        try:
+                            # Attempt to parse timestamp if provided
+                             timestamp = datetime.datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                        except ValueError:
+                             logging.warning(f"Invalid timestamp format received: {timestamp_str}. Using current UTC time.")
+                             timestamp = datetime.datetime.utcnow()
+                    else:
+                         timestamp = datetime.datetime.utcnow() # Use current UTC if not provided
 
 
                     if id_tag:
                         # Use create_session function from database.py
-                        transaction_id = create_session(id_tag, timestamp, meter_start)
+                        transaction_id = create_session(id_tag, timestamp.isoformat() + "Z", meter_start) # Pass ISO 8601 string with Z
+
 
                         logging.info(f"Created new session via database.py. Mock TransactionId: {transaction_id}")
 
@@ -111,12 +237,25 @@ async def ocpp_websocket():
                     transaction_id = payload.get("transactionId")
                     meter_stop = payload.get("meterStop")
                      # Use current UTC time if not provided in payload
-                    timestamp = payload.get("timestamp", datetime.datetime.utcnow().isoformat())
+                    # Ensure timestamp from payload is used if present
+                    timestamp_str = payload.get("timestamp")
+                    if timestamp_str:
+                         try:
+                              # Attempt to parse timestamp if provided
+                              timestamp = datetime.datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                         except ValueError:
+                              logging.warning(f"Invalid timestamp format received: {timestamp_str}. Using current UTC time.")
+                              timestamp = datetime.datetime.utcnow()
+                    else:
+                         timestamp = datetime.datetime.utcnow() # Use current UTC if not provided
+
                     # Add other relevant fields from payload if needed, e.g., idTag, transactionData
+
 
                     if transaction_id is not None and meter_stop is not None:
                         # Use update_session function from database.py
-                        update_session(transaction_id, timestamp, meter_stop)
+                        update_session(transaction_id, timestamp.isoformat() + "Z", meter_stop) # Pass ISO 8601 string with Z
+
 
                         logging.info(f"Updated session {transaction_id} via database.py.")
 
